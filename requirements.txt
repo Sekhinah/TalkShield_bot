@@ -1,14 +1,22 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
+# Build tools first so wheels are preferred
+pip>=25.1.2
+setuptools>=70.0
+wheel>=0.43.0
+
 python-telegram-bot==21.6
-transformers==4.43.3
-huggingface-hub>=0.23.0
-tokenizers>=0.15.0
-torch==2.5.1+cpu
-accelerate>=0.33.0
-deep-translator==1.11.4
-langdetect==1.0.9
 flask==3.0.3
 gunicorn==22.0.0
 httpx==0.27.2
+
+transformers==4.43.3
+tokenizers==0.15.2          # ✅ has manylinux wheels for py311
+huggingface-hub==0.23.4
+accelerate==0.33.0
+
+torch==2.5.1+cpu            # ✅ works on Render
+deep-translator==1.11.4
+langdetect==1.0.9
+
 
