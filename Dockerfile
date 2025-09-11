@@ -1,20 +1,25 @@
-# Use Python 3.10 (safer than 3.13 for now)
+# Use Python 3.10 (stable with our libs)
 FROM python:3.10-slim
 
-# Set working directory
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Copy dependency file first for caching
-COPY requirements.txt .
+# System deps for some wheels (if needed later)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
+# Install Python deps
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all code
+# Copy app code
 COPY . .
 
-# Expose port for Render
-EXPOSE 10000
+# Render exposes $PORT (we’ll bind gunicorn to it)
+ENV PORT=10000
 
-# Start Gunicorn with Flask app inside bot.py
-CMD ["gunicorn", "-k", "gthread", "-w", "1", "--threads", "8", "--timeout", "120", "bot:app"]
+# Start Gunicorn serving our Flask WSGI app named "app" in bot.py
+CMD ["gunicorn", "-k", "gthread", "-w", "1", "--threads", "8", "--timeout", "120", "bot:app", "--bind", "0.0.0.0:10000"]
