@@ -5,9 +5,8 @@ import asyncio
 import threading
 
 from telegram import Update
-from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
-    ApplicationBuilder, Application, CommandHandler,
+    ApplicationBuilder, CommandHandler,
     MessageHandler, ContextTypes, filters
 )
 
@@ -62,21 +61,19 @@ def load_twi():
         _twi_mdl = AutoModelForSequenceClassification.from_pretrained(TWI_MODEL_ID).eval()
 
 # ─────────────────────────────────────────────
-# Language detection (Google → langdetect)
+# Language detection
 # ─────────────────────────────────────────────
 def detect_lang(text: str) -> str:
     try:
         lg = (GoogleTranslator().detect(text) or "").lower()
         if lg in ("ak","twi","akan","tw"): return "ak"
         if lg == "en": return "en"
-    except Exception:
-        pass
+    except: pass
     try:
         lg2 = (detect(text) or "").lower()
         if lg2 in ("ak","twi","akan","tw"): return "ak"
         if lg2 == "en": return "en"
-    except Exception:
-        pass
+    except: pass
     return "en"
 
 # ─────────────────────────────────────────────
@@ -123,65 +120,42 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Group mode: auto delete harmful
         delete_flag = any(probs.get(lbl,0.0) >= DEFAULT_THRESHOLD for lbl in HARMFUL_ENG) if lang=="en" else (probs.get("Negative",0.0) >= DEFAULT_THRESHOLD)
         if delete_flag:
-            try:
-                await update.message.delete()
-            except Exception:
-                pass
+            try: await update.message.delete()
+            except: pass
             if ADMIN_CHAT_ID:
-                try:
-                    await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=f"🧹 Deleted message: {text}")
-                except Exception:
-                    pass
+                await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=f"🧹 Deleted message: {text}")
 
 # ─────────────────────────────────────────────
-# Main entrypoint (async)
+# Main entrypoint
 # ─────────────────────────────────────────────
 async def main_async():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    await app.run_polling(close_loop=False)   # ✅ prevents thread issues
 
-    # CRITICAL: disable signal handling so it's safe in a thread under Gunicorn
-    await app.run_polling(stop_signals=None, close_loop=False)
-
-def main():
-    if "ipykernel" in sys.modules:  # running in Jupyter
-        return asyncio.create_task(main_async())
-    else:
-        asyncio.run(main_async())
+def run_bot():
+    asyncio.run(main_async())
 
 # ─────────────────────────────────────────────
 # Flask app definition (for Render/Gunicorn)
 # ─────────────────────────────────────────────
 from flask import Flask
-flask_app = Flask(__name__)   # This is the WSGI app Gunicorn will serve
-app = flask_app               # Expose as 'app' for Gunicorn (gunicorn bot:app)
+
+flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def index():
     return "✅ TalkShield bot service is alive"
 
-# Start the Telegram bot ONCE in a background thread when module imports
-_bot_started = False
-_bot_lock = threading.Lock()
+# Start Telegram bot in background thread
+threading.Thread(target=run_bot, daemon=True).start()
 
-def _start_bot_once():
-    global _bot_started
-    with _bot_lock:
-        if not _bot_started:
-            t = threading.Thread(
-                target=lambda: asyncio.run(main_async()),
-                name="ptb_poller",
-                daemon=True
-            )
-            t.start()
-            _bot_started = True
-            log.info("TalkShield Telegram bot started in background thread.")
-
-_start_bot_once()
+# Gunicorn will use this
+app = flask_app
 
 # ─────────────────────────────────────────────
-# Local run (for development)
+# Local run
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    run_bot()
