@@ -1,20 +1,26 @@
-# Use official Python 3.10 base image
+# Use official Python base
 FROM python:3.10-slim
 
-# Set working directory
+# Workdir inside container
 WORKDIR /app
 
-# Copy project files
-COPY . /app
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip & dependencies
-RUN pip install --upgrade pip setuptools wheel
+# Copy requirements first (to leverage Docker cache)
+COPY requirements.txt .
 
-# Install project dependencies
-RUN pip install -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose default port (Render requirement)
+# Copy app code
+COPY . .
+
+# Expose port
 EXPOSE 10000
 
-# Start command (same as Procfile)
+# Start using gunicorn
 CMD ["gunicorn", "-k", "gthread", "-w", "1", "--threads", "8", "--timeout", "120", "app_webhook:app"]
