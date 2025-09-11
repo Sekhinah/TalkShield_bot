@@ -121,10 +121,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Group mode: auto delete harmful
         delete_flag = any(probs.get(lbl,0.0) >= DEFAULT_THRESHOLD for lbl in HARMFUL_ENG) if lang=="en" else (probs.get("Negative",0.0) >= DEFAULT_THRESHOLD)
         if delete_flag:
-            try: await update.message.delete()
-            except: pass
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
             if ADMIN_CHAT_ID:
-                await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=f"🧹 Deleted message: {text}")
+                try:
+                    await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=f"🧹 Deleted message: {text}")
+                except Exception:
+                    pass
 
 # ─────────────────────────────────────────────
 # Main entrypoint
@@ -133,7 +138,10 @@ async def main_async():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    await app.run_polling()
+
+    # IMPORTANT for background-threaded run under Gunicorn:
+    # disable signal handling in PTB because signals are only allowed in main thread
+    await app.run_polling(stop_signals=None)
 
 def main():
     if "ipykernel" in sys.modules:  # running in Jupyter
@@ -145,23 +153,31 @@ def main():
 # Flask app definition (for Render/Gunicorn)
 # ─────────────────────────────────────────────
 from flask import Flask
-flask_app = Flask(__name__)   # 👈 This is the WSGI app Gunicorn looks for
+flask_app = Flask(__name__)   # This is the WSGI app Gunicorn will serve
+app = flask_app               # Expose as 'app' for Gunicorn (gunicorn bot:app)
 
 @flask_app.route("/")
 def index():
     return "✅ TalkShield bot service is alive"
 
-# FIXED: run bot in a background thread (instead of before_first_request)
-def run_bot():
-    asyncio.run(main_async())
+# Start the Telegram bot ONCE in a background thread when module imports
+# (each Gunicorn worker imports this once)
+_bot_started = False
+_bot_lock = threading.Lock()
 
-threading.Thread(target=run_bot, daemon=True).start()
+def _start_bot_once():
+    global _bot_started
+    with _bot_lock:
+        if not _bot_started:
+            t = threading.Thread(target=lambda: asyncio.run(main_async()), daemon=True)
+            t.start()
+            _bot_started = True
+            log.info("TalkShield Telegram bot started in background thread.")
 
-# Gunicorn will use:  bot:flask_app
-app = flask_app
+_start_bot_once()
 
 # ─────────────────────────────────────────────
-# Local run
+# Local run (for development)
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     main()
