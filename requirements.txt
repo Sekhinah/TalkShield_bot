@@ -1,24 +1,10 @@
-# --- Web server ---
-Flask==2.3.3
-gunicorn==21.2.0
-
-# --- Telegram ---
 python-telegram-bot==20.7
-
-# --- NLP ---
 transformers==4.43.3
+torch==2.0.1+cpu
+torchvision==0.15.2+cpu
+torchaudio==2.0.2+cpu
 deep-translator==1.11.4
 langdetect==1.0.9
-
-# --- Torch CPU wheels ---
---index-url https://download.pytorch.org/whl/cpu
---extra-index-url https://pypi.org/simple
-torch==2.0.1
-torchaudio==2.0.2
-torchvision==0.15.2
-
-# misc
-numpy==2.2.6
-requests==2.32.5
-tqdm==4.67.1
-safetensors==0.6.2
+httpx~=0.25.2
+Flask==2.3.3
+gunicorn==21.2.0
