@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import asyncio
+import threading
 
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
@@ -150,11 +151,11 @@ flask_app = Flask(__name__)   # 👈 This is the WSGI app Gunicorn looks for
 def index():
     return "✅ TalkShield bot service is alive"
 
-@flask_app.before_first_request
-def startup():
-    # Start Telegram bot in background
-    loop = asyncio.get_event_loop()
-    loop.create_task(main_async())
+# FIXED: run bot in a background thread (instead of before_first_request)
+def run_bot():
+    asyncio.run(main_async())
+
+threading.Thread(target=run_bot, daemon=True).start()
 
 # Gunicorn will use:  bot:flask_app
 app = flask_app
