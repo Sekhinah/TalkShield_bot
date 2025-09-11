@@ -1,1 +1,2 @@
-web: python app_webhook.py
+gunicorn app_webhook:app
+
