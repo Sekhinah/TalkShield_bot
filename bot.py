@@ -69,12 +69,14 @@ def detect_lang(text: str) -> str:
         lg = (GoogleTranslator().detect(text) or "").lower()
         if lg in ("ak","twi","akan","tw"): return "ak"
         if lg == "en": return "en"
-    except: pass
+    except Exception:
+        pass
     try:
         lg2 = (detect(text) or "").lower()
         if lg2 in ("ak","twi","akan","tw"): return "ak"
         if lg2 == "en": return "en"
-    except: pass
+    except Exception:
+        pass
     return "en"
 
 # ─────────────────────────────────────────────
@@ -132,16 +134,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
 
 # ─────────────────────────────────────────────
-# Main entrypoint
+# Main entrypoint (async)
 # ─────────────────────────────────────────────
 async def main_async():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # IMPORTANT for background-threaded run under Gunicorn:
-    # disable signal handling in PTB because signals are only allowed in main thread
-    await app.run_polling(stop_signals=None)
+    # CRITICAL: disable signal handling so it's safe in a thread under Gunicorn
+    await app.run_polling(stop_signals=None, close_loop=False)
 
 def main():
     if "ipykernel" in sys.modules:  # running in Jupyter
@@ -161,7 +162,6 @@ def index():
     return "✅ TalkShield bot service is alive"
 
 # Start the Telegram bot ONCE in a background thread when module imports
-# (each Gunicorn worker imports this once)
 _bot_started = False
 _bot_lock = threading.Lock()
 
@@ -169,7 +169,11 @@ def _start_bot_once():
     global _bot_started
     with _bot_lock:
         if not _bot_started:
-            t = threading.Thread(target=lambda: asyncio.run(main_async()), daemon=True)
+            t = threading.Thread(
+                target=lambda: asyncio.run(main_async()),
+                name="ptb_poller",
+                daemon=True
+            )
             t.start()
             _bot_started = True
             log.info("TalkShield Telegram bot started in background thread.")
