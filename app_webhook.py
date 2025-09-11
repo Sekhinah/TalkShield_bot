@@ -140,5 +140,28 @@ def main():
     else:
         asyncio.run(main_async())
 
+# ─────────────────────────────────────────────
+# Flask app definition (for Render/Gunicorn)
+# ─────────────────────────────────────────────
+from flask import Flask
+flask_app = Flask(__name__)   # 👈 This is the WSGI app Gunicorn looks for
+
+@flask_app.route("/")
+def index():
+    return "✅ TalkShield bot service is alive"
+
+# Flask 3.x safe startup: use background thread instead of before_first_request
+import threading
+def start_bot():
+    asyncio.run(main_async())
+
+threading.Thread(target=start_bot, daemon=True).start()
+
+# Gunicorn will use:  bot:flask_app
+app = flask_app
+
+# ─────────────────────────────────────────────
+# Local run
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
     main()
