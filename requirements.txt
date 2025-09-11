@@ -1,16 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 python-telegram-bot==20.7
 transformers==4.43.3
-torch==2.2.2
-torchvision==0.17.2
-torchaudio==2.2.2
+torch==2.8.0
+torchvision==0.20.0
+torchaudio==2.8.0
 huggingface-hub==0.23.0
 langdetect==1.0.9
 deep-translator==1.11.4
 nest_asyncio==1.6.0
 gunicorn==21.2.0
 flask==3.0.3
-
-
-
-
-
