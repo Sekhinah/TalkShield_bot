@@ -1,19 +1,10 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-
-# Telegram + web
 python-telegram-bot==20.7
-flask==3.0.3
-gunicorn==21.2.0
-
-# Hugging Face / Transformers
 transformers==4.43.3
+torch==2.0.1+cpu
 tokenizers==0.19.1
 huggingface-hub==0.23.2
-safetensors==0.4.4
-
-# PyTorch (CPU-only)
-torch==2.4.1+cpu
-
-# Language tools
-deep-translator==1.11.4
 langdetect==1.0.9
+deep-translator==1.11.4
+nest-asyncio==1.6.0
+python-dotenv==1.0.1
+gunicorn==21.2.0
