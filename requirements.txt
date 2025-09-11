@@ -1,6 +1,4 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-
-pip>=25.1.2
+pip>=25.1
 setuptools>=70
 wheel>=0.43
 
@@ -9,14 +7,19 @@ flask==3.0.3
 gunicorn==22.0.0
 httpx==0.27.2
 
-transformers==4.43.3
-tokenizers==0.19.1         # ✅ compatible with Transformers 4.43.x
-huggingface-hub==0.23.4
-accelerate==0.33.0
+# HF stack (pair that has wheels for cp311 manylinux)
+transformers==4.45.2
+tokenizers==0.20.3
+huggingface-hub==0.24.6
+accelerate==0.34.2
 
+# PyTorch CPU wheels (Render has no GPU)
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.5.1+cpu
+
 deep-translator==1.11.4
 langdetect==1.0.9
+
 
 
 
