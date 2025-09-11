@@ -2,14 +2,15 @@
 
 python-telegram-bot==20.7
 transformers==4.43.3
+tokenizers==0.19.1
 huggingface-hub>=0.23.2,<1.0
-tokenizers>=0.20,<0.21
-torch==2.8.0          # CPU wheel will be used
+torch==2.8.0          # CPU wheel
 
 deep-translator==1.11.4
 langdetect==1.0.9
 nest_asyncio==1.6.0
 flask==3.0.3
 gunicorn==21.2.0
+
 
 
