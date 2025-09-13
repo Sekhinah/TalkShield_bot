@@ -1,22 +1,23 @@
 # Use lightweight Python image
 FROM python:3.10-slim
 
-# Set working directory
+# Prevent Python from buffering logs
+ENV PYTHONUNBUFFERED=1
+
+# Create working directory
 WORKDIR /app
 
-# Install system deps
-RUN apt-get update && apt-get install -y \
-    git curl build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements
+# Copy requirements first for caching
 COPY requirements.txt .
 
-# Install Python deps
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy bot code
+# Copy project files
 COPY . .
 
-# Start bot (Background Worker style)
-CMD ["python", "bot.py"]
+# Expose port 10000 for Render
+EXPOSE 10000
+
+# Start app with Gunicorn (Render looks for this port)
+CMD ["gunicorn", "-b", "0.0.0.0:10000", "bot:app"]
