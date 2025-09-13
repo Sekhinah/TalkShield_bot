@@ -1,22 +1,9 @@
-# Core bot framework
-python-telegram-bot==20.7
-
-# Flask for web server (Render port binding)
-Flask==2.3.3
-gunicorn==21.2.0
-
-# NLP / HuggingFace
-transformers==4.43.3
 torch==2.0.1
 torchvision==0.15.2
 torchaudio==2.0.2
-safetensors==0.6.2
-huggingface-hub==0.34.4
-
-# Utilities
+transformers==4.43.3
+python-telegram-bot==20.7
 deep-translator==1.11.4
 langdetect==1.0.9
-numpy==2.2.6
-pillow==11.3.0
-regex==2025.9.1
-tqdm==4.67.1
+flask==2.3.3
+gunicorn==21.2.0
