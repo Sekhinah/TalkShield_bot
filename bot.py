@@ -5,6 +5,7 @@ import asyncio
 import threading
 
 from telegram import Update
+from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     ApplicationBuilder, CommandHandler,
     MessageHandler, ContextTypes, filters
@@ -117,6 +118,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await update.message.reply_text(report)
     else:
+        # Group mode: auto delete harmful
         delete_flag = any(probs.get(lbl,0.0) >= DEFAULT_THRESHOLD for lbl in HARMFUL_ENG) if lang=="en" else (probs.get("Negative",0.0) >= DEFAULT_THRESHOLD)
         if delete_flag:
             try: await update.message.delete()
@@ -125,38 +127,41 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=f"🧹 Deleted message: {text}")
 
 # ─────────────────────────────────────────────
-# Bot runner (safe for Render Web Service)
+# Main entrypoint
 # ─────────────────────────────────────────────
 async def main_async():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    await app.run_polling(close_loop=False)
+    await app.run_polling()
 
-def run_bot():
-    asyncio.run(main_async())
+def main():
+    if "ipykernel" in sys.modules:  # running in Jupyter
+        return asyncio.create_task(main_async())
+    else:
+        asyncio.run(main_async())
 
 # ─────────────────────────────────────────────
-# Flask app for Render (keeps port open)
+# Flask app definition (for Render/Gunicorn)
 # ─────────────────────────────────────────────
 from flask import Flask
-flask_app = Flask(__name__)
+flask_app = Flask(__name__)   # 👈 WSGI app Gunicorn looks for
 
 @flask_app.route("/")
 def index():
     return "✅ TalkShield bot service is alive"
 
-@flask_app.before_first_request
-def startup():
-    # Start bot in background thread (avoids signal errors)
-    thread = threading.Thread(target=run_bot, daemon=True)
-    thread.start()
+# Start Telegram bot in background (instead of before_first_request)
+def run_bot():
+    asyncio.run(main_async())
 
-# Gunicorn entrypoint
+threading.Thread(target=run_bot, daemon=True).start()
+
+# Gunicorn will use: bot:flask_app
 app = flask_app
 
 # ─────────────────────────────────────────────
 # Local run
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    run_bot()
+    main()
