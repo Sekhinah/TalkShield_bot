@@ -1,25 +1,22 @@
-# Use Python 3.10 (stable with our libs)
+# Use lightweight Python image
 FROM python:3.10-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
+# Set working directory
 WORKDIR /app
 
-# System deps for some wheels (if needed later)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# Install system deps
+RUN apt-get update && apt-get install -y \
+    git curl build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps
+# Copy requirements
 COPY requirements.txt .
+
+# Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app code
+# Copy bot code
 COPY . .
 
-# Render exposes $PORT (we’ll bind gunicorn to it)
-ENV PORT=10000
-
-# Start Gunicorn serving our Flask WSGI app named "app" in bot.py
-CMD ["gunicorn", "-k", "gthread", "-w", "1", "--threads", "8", "--timeout", "120", "bot:app", "--bind", "0.0.0.0:10000"]
+# Start bot (Background Worker style)
+CMD ["python", "bot.py"]
