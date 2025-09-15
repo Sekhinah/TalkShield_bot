@@ -131,3 +131,12 @@ def webhook():
 
 # Gunicorn entrypoint
 app = flask_app
+
+import threading, asyncio
+
+def run_async_loop():
+    asyncio.run(application.initialize())
+    asyncio.run(application.start())
+    asyncio.get_event_loop().run_forever()
+
+threading.Thread(target=run_async_loop, daemon=True).start()
