@@ -1,26 +1,28 @@
 import os
 import logging
-import torch
 import asyncio
 import threading
+import requests
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     ContextTypes, filters
 )
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from deep_translator import GoogleTranslator
 from langdetect import detect
 
 # ─────────────────────────────────────────────
-# Environment
+# Environment variables
 # ─────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
 
 if not TOKEN:
     raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set")
+if not HF_API_TOKEN:
+    raise RuntimeError("❌ HF_API_TOKEN not set")
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -29,52 +31,39 @@ logging.basicConfig(
 log = logging.getLogger("TalkShield")
 
 # ─────────────────────────────────────────────
-# Hugging Face models
+# Hugging Face API setup
 # ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# Hugging Face models
-# ─────────────────────────────────────────────
+HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
 ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"
 TWI_MODEL_ID = "Sekhinah/Talk_Shield"
 
-ENG_LABELS = ["toxicity","severe_toxicity","obscene","threat","insult","identity_attack","sexual_explicit"]
-TWI_LABELS = ["Negative","Neutral","Positive"]
+def classify_english(text: str):
+    payload = {"inputs": text}
+    resp = requests.post(
+        f"https://api-inference.huggingface.co/models/{ENG_MODEL_ID}",
+        headers=HEADERS,
+        json=payload,
+        timeout=30
+    )
+    if resp.status_code != 200:
+        return {"error": resp.text}
+    return resp.json()
 
-_eng_tok, _eng_mdl = None, None
-_twi_tok, _twi_mdl = None, None
-
-def load_english():
-    global _eng_tok, _eng_mdl
-    if _eng_tok is None or _eng_mdl is None:
-        log.info("📥 Loading English TalkShield model...")
-        _eng_tok = AutoTokenizer.from_pretrained(
-            ENG_MODEL_ID,
-            use_fast=False
-        )
-        _eng_mdl = AutoModelForSequenceClassification.from_pretrained(
-            ENG_MODEL_ID
-        ).eval()
-        log.info("✅ English model ready")
-
-def load_twi():
-    global _twi_tok, _twi_mdl
-    if _twi_tok is None or _twi_mdl is None:
-        log.info("📥 Loading Twi TalkShield model...")
-        _twi_tok = AutoTokenizer.from_pretrained(
-            TWI_MODEL_ID,
-            use_fast=False
-        )
-        _twi_mdl = AutoModelForSequenceClassification.from_pretrained(
-            TWI_MODEL_ID
-        ).eval()
-        log.info("✅ Twi model ready")
+def classify_twi(text: str):
+    payload = {"inputs": text}
+    resp = requests.post(
+        f"https://api-inference.huggingface.co/models/{TWI_MODEL_ID}",
+        headers=HEADERS,
+        json=payload,
+        timeout=30
+    )
+    if resp.status_code != 200:
+        return {"error": resp.text}
+    return resp.json()
 
 # ─────────────────────────────────────────────
-# Preload models at startup
+# Language detection
 # ─────────────────────────────────────────────
-#load_english()
-#load_twi()
-
 def detect_lang(text: str) -> str:
     try:
         lg = (GoogleTranslator().detect(text) or "").lower()
@@ -88,25 +77,8 @@ def detect_lang(text: str) -> str:
     except: pass
     return "en"
 
-def classify_english(text: str):
-    load_english()
-    inputs = _eng_tok(text, return_tensors="pt", truncation=True, padding=True)
-    with torch.no_grad():
-        logits = _eng_mdl(**inputs).logits
-        probs = torch.sigmoid(logits).squeeze().tolist()
-    return {ENG_LABELS[i]: float(probs[i]) for i in range(len(ENG_LABELS))}
-
-def classify_twi(text: str):
-    load_twi()
-    inputs = _twi_tok(text, return_tensors="pt", truncation=True, padding=True)
-    with torch.no_grad():
-        logits = _twi_mdl(**inputs).logits
-        probs = torch.softmax(logits, dim=1).squeeze().tolist()
-        idx = int(torch.argmax(logits, dim=-1))
-    return {TWI_LABELS[i]: float(probs[i]) for i in range(len(TWI_LABELS))}, TWI_LABELS[idx]
-
 # ─────────────────────────────────────────────
-# Handlers
+# Telegram handlers
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Send me a message and I’ll analyze it with TalkShield.")
@@ -116,26 +88,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_lang(text)
 
     if lang == "ak":
-        probs, pred = classify_twi(text)
-        report = f"📊 TalkShield Report\nLang: TWI\nPrediction: {pred}\nProbs: {probs}"
+        result = classify_twi(text)
+        await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{result}")
     else:
-        probs = classify_english(text)
-        harmful = [lbl for lbl, v in probs.items() if v >= DEFAULT_THRESHOLD]
-        if not harmful:
-            harmful = ["non_toxic"]
-        report = f"📊 TalkShield Report\nLang: EN\nLabels ≥ {DEFAULT_THRESHOLD}: {harmful}\nProbs: {probs}"
-
-    await update.message.reply_text(report)
+        result = classify_english(text)
+        await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{result}")
 
 # ─────────────────────────────────────────────
-# Flask + Telegram Application in background
+# Flask + Telegram Application
 # ─────────────────────────────────────────────
 flask_app = Flask(__name__)
 application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-# Dedicated event loop for Telegram
 telegram_loop = asyncio.new_event_loop()
 def run_telegram():
     asyncio.set_event_loop(telegram_loop)
