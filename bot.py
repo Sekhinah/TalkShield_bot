@@ -72,8 +72,8 @@ def load_twi():
 # ─────────────────────────────────────────────
 # Preload models at startup
 # ─────────────────────────────────────────────
-load_english()
-load_twi()
+#load_english()
+#load_twi()
 
 def detect_lang(text: str) -> str:
     try:
