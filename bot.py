@@ -1,7 +1,7 @@
 import os
 import logging
 import torch
-import threading, asyncio
+import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import (
@@ -22,7 +22,7 @@ if not TOKEN:
     raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set in environment variables")
 
 # ─────────────────────────────────────────────
-# Logging setup
+# Logging
 # ─────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -31,7 +31,7 @@ logging.basicConfig(
 log = logging.getLogger("TalkShield")
 
 # ─────────────────────────────────────────────
-# Hugging Face models
+# Hugging Face Models
 # ─────────────────────────────────────────────
 ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"   # 7-label toxicity
 TWI_MODEL_ID = "Sekhinah/Talk_Shield"           # 3-class sentiment
@@ -113,7 +113,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(report)
 
 # ─────────────────────────────────────────────
-# Flask app (Gunicorn entrypoint)
+# Flask App (Gunicorn entrypoint)
 # ─────────────────────────────────────────────
 flask_app = Flask(__name__)
 
@@ -131,21 +131,11 @@ def webhook():
     if not data:
         return "no data", 400
     update = Update.de_json(data, application.bot)
-    application.update_queue.put_nowait(update)
+
+    # Process the update immediately
+    asyncio.run(application.process_update(update))
+
     return "ok", 200
-
-# ─────────────────────────────────────────────
-# Background dispatcher loop
-# ─────────────────────────────────────────────
-def run_async_loop():
-    async def runner():
-        await application.initialize()
-        await application.start()
-        await asyncio.Event().wait()  # keep loop alive
-
-    asyncio.run(runner())
-
-threading.Thread(target=run_async_loop, daemon=True).start()
 
 # Gunicorn entrypoint
 app = flask_app
