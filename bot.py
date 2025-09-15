@@ -1,18 +1,9 @@
 import os
-import sys
 import logging
-import asyncio
-import threading
-
-from telegram import Update
-from telegram.constants import ChatAction, ParseMode
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler,
-    MessageHandler, ContextTypes, filters
-)
-
-# Hugging Face / NLP imports
 import torch
+from flask import Flask, request
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from deep_translator import GoogleTranslator
 from langdetect import detect
@@ -25,7 +16,7 @@ ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
 
 if not TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN not set in environment variables")
+    raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set in environment variables")
 
 # ─────────────────────────────────────────────
 # Logging setup
@@ -37,14 +28,13 @@ logging.basicConfig(
 log = logging.getLogger("TalkShield")
 
 # ─────────────────────────────────────────────
-# Models
+# Hugging Face models
 # ─────────────────────────────────────────────
 ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"   # 7-label toxicity
 TWI_MODEL_ID = "Sekhinah/Talk_Shield"           # 3-class sentiment
 
-ENG_LABELS = ["toxicity","severe_toxicity","obscene","threat","insult","identity_hate","non_toxic"]
+ENG_LABELS = ["toxicity","severe_toxicity","obscene","threat","insult","identity_attack","sexual_explicit"]
 TWI_LABELS = ["Negative","Neutral","Positive"]
-HARMFUL_ENG = ENG_LABELS[:-1]  # exclude non_toxic
 
 _eng_tok, _eng_mdl = None, None
 _twi_tok, _twi_mdl = None, None
@@ -98,10 +88,10 @@ def classify_twi(text: str):
     return {TWI_LABELS[i]: float(probs[i]) for i in range(len(TWI_LABELS))}, TWI_LABELS[idx]
 
 # ─────────────────────────────────────────────
-# Telegram handlers
+# Telegram Handlers
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Hello! Send me a message and I’ll analyze it.")
+    await update.message.reply_text("👋 Hello! Send me a message and I’ll analyze it with TalkShield.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -109,59 +99,35 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lang == "ak":
         probs, pred = classify_twi(text)
-        report = f"📊 TalkShield Report\nLang: TWI\n{probs}\nPred: {pred}"
+        report = f"📊 TalkShield Report\nLang: TWI\nPrediction: {pred}\nProbs: {probs}"
     else:
         probs = classify_english(text)
-        harmful = [lbl for lbl in HARMFUL_ENG if probs.get(lbl,0.0) >= DEFAULT_THRESHOLD] or ["non_toxic"]
-        report = f"📊 TalkShield Report\nLang: EN\n{probs}\nLabels ≥ {DEFAULT_THRESHOLD}: {harmful}"
+        harmful = [lbl for lbl, v in probs.items() if v >= DEFAULT_THRESHOLD]
+        if not harmful:
+            harmful = ["non_toxic"]
+        report = f"📊 TalkShield Report\nLang: EN\nLabels ≥ {DEFAULT_THRESHOLD}: {harmful}\nProbs: {probs}"
 
-    if update.effective_chat.type == "private":
-        await update.message.reply_text(report)
-    else:
-        # Group mode: auto delete harmful
-        delete_flag = any(probs.get(lbl,0.0) >= DEFAULT_THRESHOLD for lbl in HARMFUL_ENG) if lang=="en" else (probs.get("Negative",0.0) >= DEFAULT_THRESHOLD)
-        if delete_flag:
-            try: await update.message.delete()
-            except: pass
-            if ADMIN_CHAT_ID:
-                await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=f"🧹 Deleted message: {text}")
+    await update.message.reply_text(report)
 
 # ─────────────────────────────────────────────
-# Main entrypoint
+# Flask app (Gunicorn entrypoint)
 # ─────────────────────────────────────────────
-async def main_async():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    await app.run_polling()
+flask_app = Flask(__name__)
 
-def main():
-    if "ipykernel" in sys.modules:  # running in Jupyter
-        return asyncio.create_task(main_async())
-    else:
-        asyncio.run(main_async())
-
-# ─────────────────────────────────────────────
-# Flask app definition (for Render/Gunicorn)
-# ─────────────────────────────────────────────
-from flask import Flask
-flask_app = Flask(__name__)   # 👈 WSGI app Gunicorn looks for
+application = ApplicationBuilder().token(TOKEN).build()
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 @flask_app.route("/")
 def index():
     return "✅ TalkShield bot service is alive"
 
-# Start Telegram bot in background (instead of before_first_request)
-def run_bot():
-    asyncio.run(main_async())
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    application.update_queue.put_nowait(update)
+    return "ok"
 
-threading.Thread(target=run_bot, daemon=True).start()
-
-# Gunicorn will use: bot:flask_app
+# Gunicorn entrypoint
 app = flask_app
-
-# ─────────────────────────────────────────────
-# Local run
-# ─────────────────────────────────────────────
-if __name__ == "__main__":
-    main()
