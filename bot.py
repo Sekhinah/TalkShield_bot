@@ -22,7 +22,7 @@ from langdetect import detect
 # ─────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
-DEFAULT_THRESHOLD = float(os.environ.get("TALSHIELD_THRESHOLD", "0.50"))
+DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
 
 if not TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN not set in environment variables")
