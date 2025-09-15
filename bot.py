@@ -2,6 +2,7 @@ import os
 import logging
 import torch
 import asyncio
+import threading
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import (
@@ -51,9 +52,6 @@ def load_twi():
         _twi_tok = AutoTokenizer.from_pretrained(TWI_MODEL_ID)
         _twi_mdl = AutoModelForSequenceClassification.from_pretrained(TWI_MODEL_ID).eval()
 
-# ─────────────────────────────────────────────
-# Language + classification
-# ─────────────────────────────────────────────
 def detect_lang(text: str) -> str:
     try:
         lg = (GoogleTranslator().detect(text) or "").lower()
@@ -85,7 +83,7 @@ def classify_twi(text: str):
     return {TWI_LABELS[i]: float(probs[i]) for i in range(len(TWI_LABELS))}, TWI_LABELS[idx]
 
 # ─────────────────────────────────────────────
-# Telegram handlers
+# Handlers
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Send me a message and I’ll analyze it with TalkShield.")
@@ -107,18 +105,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(report)
 
 # ─────────────────────────────────────────────
-# Flask + Application
+# Flask + Telegram Application in background
 # ─────────────────────────────────────────────
 flask_app = Flask(__name__)
-
 application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-# Create a loop and init app once
-loop = asyncio.get_event_loop()
-loop.run_until_complete(application.initialize())
-loop.run_until_complete(application.start())
+# Dedicated event loop for Telegram
+telegram_loop = asyncio.new_event_loop()
+def run_telegram():
+    asyncio.set_event_loop(telegram_loop)
+    telegram_loop.run_until_complete(application.initialize())
+    telegram_loop.run_until_complete(application.start())
+    telegram_loop.run_forever()
+
+threading.Thread(target=run_telegram, daemon=True).start()
 
 @flask_app.route("/")
 def index():
@@ -130,10 +132,7 @@ def webhook():
     if not data:
         return "no data", 400
     update = Update.de_json(data, application.bot)
-
-    # Schedule task on the existing loop (no asyncio.run!)
-    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
-
+    asyncio.run_coroutine_threadsafe(application.process_update(update), telegram_loop)
     return "ok", 200
 
 # Gunicorn entrypoint
