@@ -115,7 +115,7 @@ application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-# Initialize once at startup
+# Create a loop and init app once
 loop = asyncio.get_event_loop()
 loop.run_until_complete(application.initialize())
 loop.run_until_complete(application.start())
@@ -131,8 +131,8 @@ def webhook():
         return "no data", 400
     update = Update.de_json(data, application.bot)
 
-    # Process update on the existing loop
-    loop.create_task(application.process_update(update))
+    # Schedule task on the existing loop (no asyncio.run!)
+    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
 
     return "ok", 200
 
