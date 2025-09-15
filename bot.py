@@ -43,14 +43,46 @@ _twi_tok, _twi_mdl = None, None
 def load_english():
     global _eng_tok, _eng_mdl
     if _eng_tok is None or _eng_mdl is None:
-        _eng_tok = AutoTokenizer.from_pretrained(ENG_MODEL_ID)
-        _eng_mdl = AutoModelForSequenceClassification.from_pretrained(ENG_MODEL_ID).eval()
+        try:
+            # Try fast tokenizer with forced clean download
+            _eng_tok = AutoTokenizer.from_pretrained(
+                ENG_MODEL_ID,
+                use_fast=True,
+                force_download=True
+            )
+        except Exception as e:
+            log.error(f"⚠️ Fast tokenizer failed for English: {e}")
+            _eng_tok = AutoTokenizer.from_pretrained(
+                ENG_MODEL_ID,
+                use_fast=False,
+                force_download=True
+            )
+        _eng_mdl = AutoModelForSequenceClassification.from_pretrained(
+            ENG_MODEL_ID,
+            force_download=True
+        ).eval()
 
 def load_twi():
     global _twi_tok, _twi_mdl
     if _twi_tok is None or _twi_mdl is None:
-        _twi_tok = AutoTokenizer.from_pretrained(TWI_MODEL_ID)
-        _twi_mdl = AutoModelForSequenceClassification.from_pretrained(TWI_MODEL_ID).eval()
+        try:
+            _twi_tok = AutoTokenizer.from_pretrained(
+                TWI_MODEL_ID,
+                use_fast=True,
+                force_download=True
+            )
+        except Exception as e:
+            log.error(f"⚠️ Fast tokenizer failed for Twi: {e}")
+            _twi_tok = AutoTokenizer.from_pretrained(
+                TWI_MODEL_ID,
+                use_fast=False,
+                force_download=True
+            )
+        _twi_mdl = AutoModelForSequenceClassification.from_pretrained(
+            TWI_MODEL_ID,
+            force_download=True
+        ).eval()
+
 
 def detect_lang(text: str) -> str:
     try:
