@@ -13,17 +13,14 @@ from deep_translator import GoogleTranslator
 from langdetect import detect
 
 # ─────────────────────────────────────────────
-# Environment variables
+# Environment
 # ─────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
 
 if not TOKEN:
-    raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set in environment variables")
+    raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set")
 
-# ─────────────────────────────────────────────
-# Logging
-# ─────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO
@@ -31,10 +28,10 @@ logging.basicConfig(
 log = logging.getLogger("TalkShield")
 
 # ─────────────────────────────────────────────
-# Hugging Face Models
+# Hugging Face models
 # ─────────────────────────────────────────────
-ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"   # 7-label toxicity
-TWI_MODEL_ID = "Sekhinah/Talk_Shield"           # 3-class sentiment
+ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"
+TWI_MODEL_ID = "Sekhinah/Talk_Shield"
 
 ENG_LABELS = ["toxicity","severe_toxicity","obscene","threat","insult","identity_attack","sexual_explicit"]
 TWI_LABELS = ["Negative","Neutral","Positive"]
@@ -55,7 +52,7 @@ def load_twi():
         _twi_mdl = AutoModelForSequenceClassification.from_pretrained(TWI_MODEL_ID).eval()
 
 # ─────────────────────────────────────────────
-# Language detection
+# Language + classification
 # ─────────────────────────────────────────────
 def detect_lang(text: str) -> str:
     try:
@@ -70,9 +67,6 @@ def detect_lang(text: str) -> str:
     except: pass
     return "en"
 
-# ─────────────────────────────────────────────
-# Classification
-# ─────────────────────────────────────────────
 def classify_english(text: str):
     load_english()
     inputs = _eng_tok(text, return_tensors="pt", truncation=True, padding=True)
@@ -91,7 +85,7 @@ def classify_twi(text: str):
     return {TWI_LABELS[i]: float(probs[i]) for i in range(len(TWI_LABELS))}, TWI_LABELS[idx]
 
 # ─────────────────────────────────────────────
-# Telegram Handlers
+# Telegram handlers
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Send me a message and I’ll analyze it with TalkShield.")
@@ -113,13 +107,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(report)
 
 # ─────────────────────────────────────────────
-# Flask App (Gunicorn entrypoint)
+# Flask + Application
 # ─────────────────────────────────────────────
 flask_app = Flask(__name__)
 
 application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+# Initialize once at startup
+loop = asyncio.get_event_loop()
+loop.run_until_complete(application.initialize())
+loop.run_until_complete(application.start())
 
 @flask_app.route("/")
 def index():
@@ -132,8 +131,8 @@ def webhook():
         return "no data", 400
     update = Update.de_json(data, application.bot)
 
-    # Process the update immediately
-    asyncio.run(application.process_update(update))
+    # Process update on the existing loop
+    loop.create_task(application.process_update(update))
 
     return "ok", 200
 
