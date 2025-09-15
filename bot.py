@@ -1,9 +1,13 @@
 import os
 import logging
 import torch
+import threading, asyncio
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
+)
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from deep_translator import GoogleTranslator
 from langdetect import detect
@@ -129,14 +133,18 @@ def webhook():
     application.update_queue.put_nowait(update)
     return "ok"
 
-# Gunicorn entrypoint
-app = flask_app
-
-import threading, asyncio
-
+# ─────────────────────────────────────────────
+# Background dispatcher loop (critical fix)
+# ─────────────────────────────────────────────
 def run_async_loop():
-    asyncio.run(application.initialize())
-    asyncio.run(application.start())
-    asyncio.get_event_loop().run_forever()
+    async def runner():
+        await application.initialize()
+        await application.start()
+        await asyncio.Event().wait()  # keep loop alive
+
+    asyncio.run(runner())
 
 threading.Thread(target=run_async_loop, daemon=True).start()
+
+# Gunicorn entrypoint
+app = flask_app
