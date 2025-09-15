@@ -31,6 +31,9 @@ log = logging.getLogger("TalkShield")
 # ─────────────────────────────────────────────
 # Hugging Face models
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# Hugging Face models
+# ─────────────────────────────────────────────
 ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"
 TWI_MODEL_ID = "Sekhinah/Talk_Shield"
 
@@ -43,46 +46,34 @@ _twi_tok, _twi_mdl = None, None
 def load_english():
     global _eng_tok, _eng_mdl
     if _eng_tok is None or _eng_mdl is None:
-        try:
-            # Try fast tokenizer with forced clean download
-            _eng_tok = AutoTokenizer.from_pretrained(
-                ENG_MODEL_ID,
-                use_fast=True,
-                force_download=True
-            )
-        except Exception as e:
-            log.error(f"⚠️ Fast tokenizer failed for English: {e}")
-            _eng_tok = AutoTokenizer.from_pretrained(
-                ENG_MODEL_ID,
-                use_fast=False,
-                force_download=True
-            )
-        _eng_mdl = AutoModelForSequenceClassification.from_pretrained(
+        log.info("📥 Loading English TalkShield model...")
+        _eng_tok = AutoTokenizer.from_pretrained(
             ENG_MODEL_ID,
-            force_download=True
+            use_fast=False
+        )
+        _eng_mdl = AutoModelForSequenceClassification.from_pretrained(
+            ENG_MODEL_ID
         ).eval()
+        log.info("✅ English model ready")
 
 def load_twi():
     global _twi_tok, _twi_mdl
     if _twi_tok is None or _twi_mdl is None:
-        try:
-            _twi_tok = AutoTokenizer.from_pretrained(
-                TWI_MODEL_ID,
-                use_fast=True,
-                force_download=True
-            )
-        except Exception as e:
-            log.error(f"⚠️ Fast tokenizer failed for Twi: {e}")
-            _twi_tok = AutoTokenizer.from_pretrained(
-                TWI_MODEL_ID,
-                use_fast=False,
-                force_download=True
-            )
-        _twi_mdl = AutoModelForSequenceClassification.from_pretrained(
+        log.info("📥 Loading Twi TalkShield model...")
+        _twi_tok = AutoTokenizer.from_pretrained(
             TWI_MODEL_ID,
-            force_download=True
+            use_fast=False
+        )
+        _twi_mdl = AutoModelForSequenceClassification.from_pretrained(
+            TWI_MODEL_ID
         ).eval()
+        log.info("✅ Twi model ready")
 
+# ─────────────────────────────────────────────
+# Preload models at startup
+# ─────────────────────────────────────────────
+load_english()
+load_twi()
 
 def detect_lang(text: str) -> str:
     try:
