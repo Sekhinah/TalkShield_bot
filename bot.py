@@ -33,6 +33,24 @@ logging.basicConfig(
     level=logging.INFO
 )
 log = logging.getLogger("TalkShield")
+# ──────────────────────────────
+# Logging deleted messages
+# ──────────────────────────────
+LOG_FILE = "deleted_logs.jsonl"
+
+def log_deleted_message(chat_id, user_id, text, labels):
+    """Append deleted message info to a log file."""
+    entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "text": text,
+        "labels": labels,
+    }
+    with open(LOG_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    log.info("📝 Deleted message logged: %s", entry)
+
 
 # ─────────────────────────────────────────────
 # Helpers: API calls to your Space
