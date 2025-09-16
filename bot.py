@@ -215,7 +215,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
 
 
-from telegram import InputFile
+BOT_OWNER_ID = int(os.environ.get("BOT_OWNER_ID", "123456789"))  # replace with your ID
 
 async def getlogs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send the deleted_logs.jsonl file to the bot owner."""
@@ -235,8 +235,9 @@ async def getlogs(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InputFile(f, filename="deleted_logs.jsonl"),
                 caption="📝 Deleted messages log"
             )
+        log.info("📤 Sent logs to user %s", user_id)
     except Exception as e:
-        log.error("Failed to send logs: %s", e)
+        log.error("❌ Failed to send logs: %s", e)
         await update.message.reply_text("⚠️ Failed to send log file.")
 
 
@@ -248,6 +249,7 @@ application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 application.add_handler(CommandHandler("getlogs", getlogs))
+
 
 
 # Dedicated event loop for PTB
