@@ -36,6 +36,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("TalkShield")
 # ──────────────────────────────
+# Hugging Face request semaphore
+# ──────────────────────────────
+# allow 2 concurrent Hugging Face requests at a time
+hf_semaphore = asyncio.Semaphore(2)
+# ──────────────────────────────
 # Logging deleted messages
 # ──────────────────────────────
 import os
@@ -68,35 +73,35 @@ def log_deleted_message(chat_id, user_id, text, labels):
 # Helpers: API calls to your Space
 # ─────────────────────────────────────────────
 
-def call_space(path, payload, attempts=3):
+
+async def call_space_async(path, payload, attempts=3):
+    """Queued + retried call to Hugging Face Space."""
     url = f"{SPACE_URL.rstrip('/')}/{path.lstrip('/')}"
-    for i in range(attempts):
-        try:
-            resp = requests.post(url, json=payload, timeout=45)
-            if resp.status_code == 200:
-                return resp.json()
-            # If Space is still warming up
-            if resp.status_code in (503, 502):
-                if i < attempts - 1:
+    async with hf_semaphore:  # ensures max 2 calls at once
+        for i in range(attempts):
+            try:
+                resp = requests.post(url, json=payload, timeout=45)
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code in (502, 503) and i < attempts - 1:
                     wait = 2 ** i
                     log.warning("Space cold start, retrying in %s sec...", wait)
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                     continue
-            return {"error": f"Space error {resp.status_code}: {resp.text}"}
-        except Exception as e:
-            if i < attempts - 1:
-                wait = 2 ** i
-                log.warning("Request failed (%s). Retrying in %s sec...", e, wait)
-                time.sleep(wait)
-                continue
-            return {"error": str(e)}
+                return {"error": f"Space error {resp.status_code}"}
+            except Exception as e:
+                if i < attempts - 1:
+                    wait = 2 ** i
+                    log.warning("Request failed (%s). Retrying in %s sec...", e, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                return {"error": str(e)}
 
+async def classify_english_async(text):
+    return await call_space_async("/english", {"text": text})
 
-def classify_english(text: str) -> Dict[str, Any]:
-    return call_space("/english", {"text": text})
-
-def classify_twi(text: str) -> Dict[str, Any]:
-    return call_space("/twi", {"text": text})
+async def classify_twi_async(text):
+    return await call_space_async("/twi", {"text": text})
 
 # ─────────────────────────────────────────────
 # Pretty formatting
