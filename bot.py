@@ -4,26 +4,29 @@ import asyncio
 import threading
 import requests
 from flask import Flask, request
+from typing import Dict, Any
+
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     ContextTypes, filters
 )
-from deep_translator import GoogleTranslator
-from langdetect import detect
 
 # ─────────────────────────────────────────────
-# Environment variables
+# Environment
 # ─────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
+SPACE_URL = os.environ.get("SPACE_URL")  # e.g. https://<username>-talkshield-api.hf.space
 DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
 
 if not TOKEN:
     raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set")
-if not HF_API_TOKEN:
-    raise RuntimeError("❌ HF_API_TOKEN not set")
+if not SPACE_URL:
+    raise RuntimeError("❌ SPACE_URL not set (e.g. https://<user>-talkshield-api.hf.space)")
 
+# ─────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO
@@ -31,77 +34,97 @@ logging.basicConfig(
 log = logging.getLogger("TalkShield")
 
 # ─────────────────────────────────────────────
-# Hugging Face API setup
+# Helpers: API calls to your Space
 # ─────────────────────────────────────────────
-HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-ENG_MODEL_ID = "Sekhinah/Talk_Shield_English"
-TWI_MODEL_ID = "Sekhinah/Talk_Shield"
-
-def classify_english(text: str):
-    payload = {"inputs": text}
-    resp = requests.post(
-        f"https://api-inference.huggingface.co/models/{ENG_MODEL_ID}",
-        headers=HEADERS,
-        json=payload,
-        timeout=30
-    )
-    if resp.status_code != 200:
-        return {"error": resp.text}
-    return resp.json()
-
-def classify_twi(text: str):
-    payload = {"inputs": text}
-    resp = requests.post(
-        f"https://api-inference.huggingface.co/models/{TWI_MODEL_ID}",
-        headers=HEADERS,
-        json=payload,
-        timeout=30
-    )
-    if resp.status_code != 200:
-        return {"error": resp.text}
-    return resp.json()
-
-# ─────────────────────────────────────────────
-# Language detection
-# ─────────────────────────────────────────────
-def detect_lang(text: str) -> str:
+def call_space(path: str, payload: Dict[str, Any], timeout: int = 45) -> Dict[str, Any]:
+    url = f"{SPACE_URL.rstrip('/')}/{path.lstrip('/')}"
     try:
-        lg = (GoogleTranslator().detect(text) or "").lower()
-        if lg in ("ak","twi","akan","tw"): return "ak"
-        if lg == "en": return "en"
-    except: pass
-    try:
-        lg2 = (detect(text) or "").lower()
-        if lg2 in ("ak","twi","akan","tw"): return "ak"
-        if lg2 == "en": return "en"
-    except: pass
-    return "en"
+        resp = requests.post(url, json=payload, timeout=timeout)
+        if resp.status_code == 200:
+            return resp.json()
+        log.error("Space error %s: %s", resp.status_code, resp.text)
+        return {"error": f"Space error {resp.status_code}"}
+    except Exception as e:
+        log.exception("Space request failed")
+        return {"error": str(e)}
+
+def classify_english(text: str) -> Dict[str, Any]:
+    return call_space("/english", {"text": text})
+
+def classify_twi(text: str) -> Dict[str, Any]:
+    return call_space("/twi", {"text": text})
 
 # ─────────────────────────────────────────────
-# Telegram handlers
+# Pretty formatting
+# ─────────────────────────────────────────────
+def format_english(scores: Dict[str, float]) -> str:
+    if "error" in scores:
+        return f"❌ Inference error: {scores['error']}"
+
+    # Expecting shape: {"toxicity": 0.12, "severe_toxicity": 0.01, ...}
+    harmful = [k for k, v in scores.items() if v >= DEFAULT_THRESHOLD]
+    lines = [f"• {k}: {scores[k]:.2f}" for k in sorted(scores.keys())]
+    harm_line = "None (non_toxic)" if not harmful else ", ".join(harmful)
+    return (
+        f"Labels ≥ {DEFAULT_THRESHOLD:.2f}: {harm_line}\n"
+        + "\n".join(lines)
+    )
+
+def format_twi(result: Dict[str, Any]) -> str:
+    if "error" in result:
+        return f"❌ Inference error: {result['error']}"
+
+    # Expecting shape: {"scores": {"Negative": 0.9, ...}, "prediction": "Negative"}
+    pred = result.get("prediction", "?")
+    scores = result.get("scores", {})
+    lines = [f"• {k}: {scores.get(k, 0):.2f}" for k in ["Negative", "Neutral", "Positive"]]
+    return f"Prediction: {pred}\n" + "\n".join(lines)
+
+# ─────────────────────────────────────────────
+# Telegram Handlers
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Hello! Send me a message and I’ll analyze it with TalkShield.")
+    await update.message.reply_text(
+        "🛡️ TalkShield is live!\n"
+        "• Send an English message for toxicity scores\n"
+        "• Send a Twi message for sentiment\n"
+        f"• Harmful threshold: {DEFAULT_THRESHOLD:.2f}\n"
+    )
+
+def is_twi_like(text: str) -> bool:
+    """
+    Quick heuristic for Twi/Akan (offline-friendly).
+    If you later prefer, replace with langid/fasttext, or send both and route by confidence.
+    """
+    text_l = text.lower()
+    # common Twi tokens; adjust as you like
+    hints = ["ɛ", "ɔ", "wo", "w'","me", "ɛyɛ", "nsɛm", "waa", "agyimi", "dam", "pɔ"]
+    return any(h in text_l for h in hints)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    lang = detect_lang(text)
+    text = (update.message.text or "").strip()
+    if not text:
+        return
 
-    if lang == "ak":
+    # route
+    if is_twi_like(text):
         result = classify_twi(text)
-        await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{result}")
+        pretty = format_twi(result)
+        await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
     else:
         result = classify_english(text)
-        await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{result}")
+        pretty = format_english(result)
+        await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
 
 # ─────────────────────────────────────────────
-# Flask + Telegram Application
+# Flask + PTB Application (webhook)
 # ─────────────────────────────────────────────
 flask_app = Flask(__name__)
 application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
+# Dedicated event loop for PTB
 telegram_loop = asyncio.new_event_loop()
 def run_telegram():
     asyncio.set_event_loop(telegram_loop)
