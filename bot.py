@@ -160,7 +160,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ─────────────── TWI HANDLING ───────────────
     if is_twi_like(text):
-        result = classify_twi(text)
+        result = await classify_twi_async(text)   # ✅ async version
         pretty = format_twi(result)
 
         if is_group:
@@ -173,7 +173,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat.id,
                         "🚨 A message was removed for toxicity (Twi: Negative sentiment)"
                     )
-                    # ✅ Log deletion
+                    # ✅ log deletion
                     log_deleted_message(
                         chat.id,
                         update.effective_user.id,
@@ -182,14 +182,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception as e:
                     log.warning("Failed to delete Twi message: %s", e)
-            # If not Negative → safe → do nothing in group
+            # else: safe Twi → no reply
         else:
             # Private chat → always reply
             await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
 
     # ─────────────── ENGLISH HANDLING ───────────────
     else:
-        result = classify_english(text)
+        result = await classify_english_async(text)   # ✅ async version
         pretty = format_english(result)
 
         # collect harmful labels above threshold
@@ -205,7 +205,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat.id,
                         f"🚨 A message was removed for toxicity: {', '.join(harmful_labels)}"
                     )
-                    # ✅ Log deletion
+                    # ✅ log deletion
                     log_deleted_message(
                         chat.id,
                         update.effective_user.id,
@@ -214,10 +214,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception as e:
                     log.warning("Failed to delete EN message: %s", e)
-            # If safe → do nothing in group
+            # else: safe EN → no reply
         else:
             # Private chat → always reply
             await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
+
 
 
 BOT_OWNER_ID = int(os.environ.get("BOT_OWNER_ID", "123456789"))  # replace with your ID
