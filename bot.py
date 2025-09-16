@@ -38,8 +38,11 @@ log = logging.getLogger("TalkShield")
 # ──────────────────────────────
 # Hugging Face request semaphore
 # ──────────────────────────────
-# allow 2 concurrent Hugging Face requests at a time
-hf_semaphore = asyncio.Semaphore(2)
+HF_MAX_CONCURRENCY = int(os.environ.get("HF_MAX_CONCURRENCY", "2"))
+hf_semaphore = asyncio.Semaphore(HF_MAX_CONCURRENCY)
+
+log.info("🔧 Hugging Face concurrency set to %s", HF_MAX_CONCURRENCY)
+
 # ──────────────────────────────
 # Logging deleted messages
 # ──────────────────────────────
