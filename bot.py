@@ -1,288 +1,73 @@
-import os
-import logging
-import asyncio
-import threading
-import requests
-import time
 from flask import Flask, request
-from typing import Dict, Any
+from twilio.twiml.messaging_response import MessagingResponse
+import requests
 
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
-)
+SPACE_URL = "https://Sekhinah-talkshield-api.hf.space"
+DEFAULT_THRESHOLD = 0.5
 
-# ─────────────────────────────────────────────
-# Environment
-# ─────────────────────────────────────────────
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-SPACE_URL = os.environ.get("SPACE_URL")  # e.g. https://<username>-talkshield-api.hf.space
-DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
-BOT_OWNER_ID = int(os.environ.get("BOT_OWNER_ID", "123456789"))  # replace with your Telegram ID
-
-
-if not TOKEN:
-    raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set")
-if not SPACE_URL:
-    raise RuntimeError("❌ SPACE_URL not set (e.g. https://<user>-talkshield-api.hf.space)")
-
-# ─────────────────────────────────────────────
-# Logging
-# ─────────────────────────────────────────────
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=logging.INFO
-)
-log = logging.getLogger("TalkShield")
-# ──────────────────────────────
-# Hugging Face request semaphore
-# ──────────────────────────────
-HF_MAX_CONCURRENCY = int(os.environ.get("HF_MAX_CONCURRENCY", "2"))
-hf_semaphore = asyncio.Semaphore(HF_MAX_CONCURRENCY)
-
-log.info("🔧 Hugging Face concurrency set to %s", HF_MAX_CONCURRENCY)
+app = Flask(__name__)
 
 # ──────────────────────────────
-# Logging deleted messages
+# Helpers
 # ──────────────────────────────
-import os
-import json
-from datetime import datetime
-from telegram import InputFile
-
-# Always store log file in current working directory
-LOG_FILE = os.path.join(os.getcwd(), "deleted_logs.jsonl")
-
-def log_deleted_message(chat_id, user_id, text, labels):
-    """Append deleted message info to a log file."""
-    entry = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "chat_id": chat_id,
-        "user_id": user_id,
-        "text": text,
-        "labels": labels,
-    }
+def call_space(path: str, payload: dict):
     try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        log.info("📝 Deleted message logged to %s: %s", LOG_FILE, entry)
+        r = requests.post(f"{SPACE_URL.rstrip('/')}/{path.lstrip('/')}",
+                          json=payload, timeout=60)
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
-        log.error("❌ Failed to write log to %s: %s", LOG_FILE, e)
+        return {"error": str(e), "raw": getattr(r, "text", "")}
 
+def is_twi_like(text: str) -> bool:
+    text_l = text.lower()
+    hints = ["ɛ", "ɔ", "wo", "w'", "me", "ɛyɛ", "nsɛm", "waa", "agyimi", "dam", "pɔ"]
+    return any(h in text_l for h in hints)
 
-
-# ─────────────────────────────────────────────
-# Helpers: API calls to your Space
-# ─────────────────────────────────────────────
-
-
-async def call_space_async(path, payload, attempts=3):
-    """Queued + retried call to Hugging Face Space."""
-    url = f"{SPACE_URL.rstrip('/')}/{path.lstrip('/')}"
-    async with hf_semaphore:  # ensures max 2 calls at once
-        for i in range(attempts):
-            try:
-                resp = requests.post(url, json=payload, timeout=45)
-                if resp.status_code == 200:
-                    return resp.json()
-                if resp.status_code in (502, 503) and i < attempts - 1:
-                    wait = 2 ** i
-                    log.warning("Space cold start, retrying in %s sec...", wait)
-                    await asyncio.sleep(wait)
-                    continue
-                return {"error": f"Space error {resp.status_code}"}
-            except Exception as e:
-                if i < attempts - 1:
-                    wait = 2 ** i
-                    log.warning("Request failed (%s). Retrying in %s sec...", e, wait)
-                    await asyncio.sleep(wait)
-                    continue
-                return {"error": str(e)}
-
-async def classify_english_async(text):
-    return await call_space_async("/english", {"text": text})
-
-async def classify_twi_async(text):
-    return await call_space_async("/twi", {"text": text})
-
-# ─────────────────────────────────────────────
-# Pretty formatting
-# ─────────────────────────────────────────────
-def format_english(scores: Dict[str, float]) -> str:
+def format_english(scores: dict) -> str:
     if "error" in scores:
         return f"❌ Inference error: {scores['error']}"
-
-    # Expecting shape: {"toxicity": 0.12, "severe_toxicity": 0.01, ...}
-    harmful = [k for k, v in scores.items() if v >= DEFAULT_THRESHOLD]
-    lines = [f"• {k}: {scores[k]:.2f}" for k in sorted(scores.keys())]
+    harmful = [k for k, v in scores.items() if isinstance(v, float) and v >= DEFAULT_THRESHOLD]
     harm_line = "None (non_toxic)" if not harmful else ", ".join(harmful)
-    return (
-        f"Labels ≥ {DEFAULT_THRESHOLD:.2f}: {harm_line}\n"
-        + "\n".join(lines)
-    )
+    lines = [f"• {k}: {scores[k]:.2f}" for k in sorted(scores.keys()) if isinstance(scores[k], float)]
+    return f"Labels ≥ {DEFAULT_THRESHOLD:.2f}: {harm_line}\n" + "\n".join(lines)
 
-def format_twi(result: Dict[str, Any]) -> str:
+def format_twi(result: dict) -> str:
     if "error" in result:
         return f"❌ Inference error: {result['error']}"
-
-    # Expecting shape: {"scores": {"Negative": 0.9, ...}, "prediction": "Negative"}
     pred = result.get("prediction", "?")
     scores = result.get("scores", {})
     lines = [f"• {k}: {scores.get(k, 0):.2f}" for k in ["Negative", "Neutral", "Positive"]]
     return f"Prediction: {pred}\n" + "\n".join(lines)
 
-# ─────────────────────────────────────────────
-# Telegram Handlers
-# ─────────────────────────────────────────────
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🛡️ TalkShield is live!\n"
-        "• Send an English message for toxicity scores\n"
-        "• Send a Twi message for sentiment\n"
-        f"• Harmful threshold: {DEFAULT_THRESHOLD:.2f}\n"
-    )
+# ──────────────────────────────
+# WhatsApp Webhook
+# ──────────────────────────────
+@app.route("/whatsapp", methods=["POST"])
+def whatsapp_webhook():
+    msg = request.form.get("Body", "")
+    reply = MessagingResponse()
 
-def is_twi_like(text: str) -> bool:
-    """
-    Quick heuristic for Twi/Akan (offline-friendly).
-    If you later prefer, replace with langid/fasttext, or send both and route by confidence.
-    """
-    text_l = text.lower()
-    # common Twi tokens; adjust as you like
-    hints = ["ɛ", "ɔ", "wo", "w'","me", "ɛyɛ", "nsɛm", "waa", "agyimi", "dam", "pɔ"]
-    return any(h in text_l for h in hints)
+    if not msg.strip():
+        reply.message("⚠️ Empty message received.")
+        return str(reply)
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
-    if not text:
-        return
-
-    chat = update.effective_chat
-    is_group = chat.type in ("group", "supergroup")
-
-    # ─────────────── TWI HANDLING ───────────────
-    if is_twi_like(text):
-        result = await classify_twi_async(text)   # ✅ async version
+    # Decide Twi or English
+    if is_twi_like(msg):
+        result = call_space("/twi", {"text": msg})
         pretty = format_twi(result)
-
-        if is_group:
-            # In groups: only act if prediction is Negative
-            pred = result.get("prediction", "")
-            if pred == "Negative":
-                try:
-                    await context.bot.delete_message(chat.id, update.message.message_id)
-                    await context.bot.send_message(
-                        chat.id,
-                        "🚨 A message was removed for toxicity (Twi: Negative sentiment)"
-                    )
-                    # ✅ log deletion
-                    log_deleted_message(
-                        chat.id,
-                        update.effective_user.id,
-                        text,
-                        ["Negative"]
-                    )
-                except Exception as e:
-                    log.warning("Failed to delete Twi message: %s", e)
-            # else: safe Twi → no reply
-        else:
-            # Private chat → always reply
-            await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
-
-    # ─────────────── ENGLISH HANDLING ───────────────
+        reply.message(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
     else:
-        result = await classify_english_async(text)   # ✅ async version
+        result = call_space("/english", {"text": msg})
         pretty = format_english(result)
+        reply.message(f"📊 TalkShield Report\nLang: EN\n{pretty}")
 
-        # collect harmful labels above threshold
-        harmful_labels = [
-            k for k, v in result.items() if isinstance(v, float) and v >= DEFAULT_THRESHOLD
-        ]
+    return str(reply)
 
-        if is_group:
-            if harmful_labels:
-                try:
-                    await context.bot.delete_message(chat.id, update.message.message_id)
-                    await context.bot.send_message(
-                        chat.id,
-                        f"🚨 A message was removed for toxicity: {', '.join(harmful_labels)}"
-                    )
-                    # ✅ log deletion
-                    log_deleted_message(
-                        chat.id,
-                        update.effective_user.id,
-                        text,
-                        harmful_labels
-                    )
-                except Exception as e:
-                    log.warning("Failed to delete EN message: %s", e)
-            # else: safe EN → no reply
-        else:
-            # Private chat → always reply
-            await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
-
-
-
-BOT_OWNER_ID = int(os.environ.get("BOT_OWNER_ID", "123456789"))  # replace with your ID
-
-async def getlogs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the deleted_logs.jsonl file to the bot owner."""
-    user_id = update.effective_user.id
-
-    if user_id != BOT_OWNER_ID:
-        await update.message.reply_text("⛔ You are not authorized to view logs.")
-        return
-
-    if not os.path.exists(LOG_FILE):
-        await update.message.reply_text("📭 No logs yet.")
-        return
-
-    try:
-        with open(LOG_FILE, "rb") as f:
-            await update.message.reply_document(
-                InputFile(f, filename="deleted_logs.jsonl"),
-                caption="📝 Deleted messages log"
-            )
-        log.info("📤 Sent logs to user %s", user_id)
-    except Exception as e:
-        log.error("❌ Failed to send logs: %s", e)
-        await update.message.reply_text("⚠️ Failed to send log file.")
-
-
-# ─────────────────────────────────────────────
-# Flask + PTB Application (webhook)
-# ─────────────────────────────────────────────
-flask_app = Flask(__name__)
-application = ApplicationBuilder().token(TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-application.add_handler(CommandHandler("getlogs", getlogs))
-
-
-
-# Dedicated event loop for PTB
-telegram_loop = asyncio.new_event_loop()
-def run_telegram():
-    asyncio.set_event_loop(telegram_loop)
-    telegram_loop.run_until_complete(application.initialize())
-    telegram_loop.run_until_complete(application.start())
-    telegram_loop.run_forever()
-
-threading.Thread(target=run_telegram, daemon=True).start()
-
-@flask_app.route("/")
+# Optional root route for browser check
+@app.route("/")
 def index():
-    return "✅ TalkShield bot service is alive", 200
+    return "✅ WhatsApp TalkShield service is alive", 200
 
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True, silent=True)
-    if not data:
-        return "no data", 400
-    update = Update.de_json(data, application.bot)
-    asyncio.run_coroutine_threadsafe(application.process_update(update), telegram_loop)
-    return "ok", 200
-
-# Gunicorn entrypoint
-app = flask_app
+if __name__ == "__main__":
+    app.run(port=5000, debug=True)
