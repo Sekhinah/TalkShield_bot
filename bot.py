@@ -3,6 +3,7 @@ import logging
 import asyncio
 import threading
 import requests
+import time
 from flask import Flask, request
 from typing import Dict, Any
 
@@ -36,17 +37,30 @@ log = logging.getLogger("TalkShield")
 # ─────────────────────────────────────────────
 # Helpers: API calls to your Space
 # ─────────────────────────────────────────────
-def call_space(path: str, payload: Dict[str, Any], timeout: int = 45) -> Dict[str, Any]:
+
+def call_space(path, payload, attempts=3):
     url = f"{SPACE_URL.rstrip('/')}/{path.lstrip('/')}"
-    try:
-        resp = requests.post(url, json=payload, timeout=timeout)
-        if resp.status_code == 200:
-            return resp.json()
-        log.error("Space error %s: %s", resp.status_code, resp.text)
-        return {"error": f"Space error {resp.status_code}"}
-    except Exception as e:
-        log.exception("Space request failed")
-        return {"error": str(e)}
+    for i in range(attempts):
+        try:
+            resp = requests.post(url, json=payload, timeout=45)
+            if resp.status_code == 200:
+                return resp.json()
+            # If Space is still warming up
+            if resp.status_code in (503, 502):
+                if i < attempts - 1:
+                    wait = 2 ** i
+                    log.warning("Space cold start, retrying in %s sec...", wait)
+                    time.sleep(wait)
+                    continue
+            return {"error": f"Space error {resp.status_code}: {resp.text}"}
+        except Exception as e:
+            if i < attempts - 1:
+                wait = 2 ** i
+                log.warning("Request failed (%s). Retrying in %s sec...", e, wait)
+                time.sleep(wait)
+                continue
+            return {"error": str(e)}
+
 
 def classify_english(text: str) -> Dict[str, Any]:
     return call_space("/english", {"text": text})
