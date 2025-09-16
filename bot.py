@@ -121,31 +121,51 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat = update.effective_chat
+    is_group = chat.type in ("group", "supergroup")
 
     if is_twi_like(text):
         result = classify_twi(text)
         pretty = format_twi(result)
-        await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
+
+        if is_group:
+            # In groups: only act if negative
+            pred = result.get("prediction", "")
+            if pred == "Negative":
+                try:
+                    await context.bot.delete_message(chat.id, update.message.message_id)
+                    await context.bot.send_message(
+                        chat.id,
+                        "🚨 A message was removed for toxicity (Twi: Negative sentiment)"
+                    )
+                except Exception as e:
+                    log.warning("Failed to delete Twi message: %s", e)
+            # else: do nothing in group
+        else:
+            # Private chat → always reply
+            await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
+
     else:
         result = classify_english(text)
         pretty = format_english(result)
+        # collect harmful labels
+        harmful_labels = [
+            k for k, v in result.items() if isinstance(v, float) and v >= DEFAULT_THRESHOLD
+        ]
 
-        # Auto-delete in groups if harmful
-        harmful_labels = [k for k, v in result.items() if isinstance(v, float) and v >= DEFAULT_THRESHOLD]
-        if chat.type in ("group", "supergroup") and harmful_labels:
-            try:
-                await context.bot.delete_message(chat.id, update.message.message_id)
-                await context.bot.send_message(
-                    chat.id,
-                    f"🚨 A message was removed for toxicity: {', '.join(harmful_labels)}"
-                )
-                return  # don’t echo original result to group
-            except Exception as e:
-                log.warning("Failed to delete message: %s", e)
-
-        # For private chats or safe content, just reply
-        await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
-
+        if is_group:
+            if harmful_labels:
+                try:
+                    await context.bot.delete_message(chat.id, update.message.message_id)
+                    await context.bot.send_message(
+                        chat.id,
+                        f"🚨 A message was removed for toxicity: {', '.join(harmful_labels)}"
+                    )
+                except Exception as e:
+                    log.warning("Failed to delete EN message: %s", e)
+            # else: safe → no reply in group
+        else:
+            # Private chat → always reply
+            await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
 
 # ─────────────────────────────────────────────
 # Flask + PTB Application (webhook)
