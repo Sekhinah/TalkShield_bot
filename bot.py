@@ -19,6 +19,8 @@ from telegram.ext import (
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 SPACE_URL = os.environ.get("SPACE_URL")  # e.g. https://<username>-talkshield-api.hf.space
 DEFAULT_THRESHOLD = float(os.environ.get("TALKSHIELD_THRESHOLD", "0.50"))
+BOT_OWNER_ID = int(os.environ.get("BOT_OWNER_ID", "123456789"))  # replace with your Telegram ID
+
 
 if not TOKEN:
     raise RuntimeError("❌ TELEGRAM_BOT_TOKEN not set")
