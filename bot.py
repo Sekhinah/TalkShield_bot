@@ -141,12 +141,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     is_group = chat.type in ("group", "supergroup")
 
+    # ─────────────── TWI HANDLING ───────────────
     if is_twi_like(text):
         result = classify_twi(text)
         pretty = format_twi(result)
 
         if is_group:
-            # In groups: only act if negative
+            # In groups: only act if prediction is Negative
             pred = result.get("prediction", "")
             if pred == "Negative":
                 try:
@@ -155,17 +156,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat.id,
                         "🚨 A message was removed for toxicity (Twi: Negative sentiment)"
                     )
+                    # ✅ Log deletion
+                    log_deleted_message(
+                        chat.id,
+                        update.effective_user.id,
+                        text,
+                        ["Negative"]
+                    )
                 except Exception as e:
                     log.warning("Failed to delete Twi message: %s", e)
-            # else: do nothing in group
+            # If not Negative → safe → do nothing in group
         else:
             # Private chat → always reply
             await update.message.reply_text(f"📊 TalkShield Report\nLang: TWI\n{pretty}")
 
+    # ─────────────── ENGLISH HANDLING ───────────────
     else:
         result = classify_english(text)
         pretty = format_english(result)
-        # collect harmful labels
+
+        # collect harmful labels above threshold
         harmful_labels = [
             k for k, v in result.items() if isinstance(v, float) and v >= DEFAULT_THRESHOLD
         ]
@@ -178,12 +188,45 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat.id,
                         f"🚨 A message was removed for toxicity: {', '.join(harmful_labels)}"
                     )
+                    # ✅ Log deletion
+                    log_deleted_message(
+                        chat.id,
+                        update.effective_user.id,
+                        text,
+                        harmful_labels
+                    )
                 except Exception as e:
                     log.warning("Failed to delete EN message: %s", e)
-            # else: safe → no reply in group
+            # If safe → do nothing in group
         else:
             # Private chat → always reply
             await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
+
+
+from telegram import InputFile
+
+async def getlogs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the deleted_logs.jsonl file to the bot owner."""
+    user_id = update.effective_user.id
+
+    if user_id != BOT_OWNER_ID:
+        await update.message.reply_text("⛔ You are not authorized to view logs.")
+        return
+
+    if not os.path.exists(LOG_FILE):
+        await update.message.reply_text("📭 No logs yet.")
+        return
+
+    try:
+        with open(LOG_FILE, "rb") as f:
+            await update.message.reply_document(
+                InputFile(f, filename="deleted_logs.jsonl"),
+                caption="📝 Deleted messages log"
+            )
+    except Exception as e:
+        log.error("Failed to send logs: %s", e)
+        await update.message.reply_text("⚠️ Failed to send log file.")
+
 
 # ─────────────────────────────────────────────
 # Flask + PTB Application (webhook)
