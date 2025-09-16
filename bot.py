@@ -38,7 +38,13 @@ log = logging.getLogger("TalkShield")
 # ──────────────────────────────
 # Logging deleted messages
 # ──────────────────────────────
-LOG_FILE = "deleted_logs.jsonl"
+import os
+import json
+from datetime import datetime
+from telegram import InputFile
+
+# Always store log file in current working directory
+LOG_FILE = os.path.join(os.getcwd(), "deleted_logs.jsonl")
 
 def log_deleted_message(chat_id, user_id, text, labels):
     """Append deleted message info to a log file."""
@@ -49,9 +55,13 @@ def log_deleted_message(chat_id, user_id, text, labels):
         "text": text,
         "labels": labels,
     }
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-    log.info("📝 Deleted message logged: %s", entry)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        log.info("📝 Deleted message logged to %s: %s", LOG_FILE, entry)
+    except Exception as e:
+        log.error("❌ Failed to write log to %s: %s", LOG_FILE, e)
+
 
 
 # ─────────────────────────────────────────────
