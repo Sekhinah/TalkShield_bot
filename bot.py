@@ -120,7 +120,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # route
+    chat = update.effective_chat
+
     if is_twi_like(text):
         result = classify_twi(text)
         pretty = format_twi(result)
@@ -128,7 +129,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         result = classify_english(text)
         pretty = format_english(result)
+
+        # Auto-delete in groups if harmful
+        harmful_labels = [k for k, v in result.items() if isinstance(v, float) and v >= DEFAULT_THRESHOLD]
+        if chat.type in ("group", "supergroup") and harmful_labels:
+            try:
+                await context.bot.delete_message(chat.id, update.message.message_id)
+                await context.bot.send_message(
+                    chat.id,
+                    f"🚨 A message was removed for toxicity: {', '.join(harmful_labels)}"
+                )
+                return  # don’t echo original result to group
+            except Exception as e:
+                log.warning("Failed to delete message: %s", e)
+
+        # For private chats or safe content, just reply
         await update.message.reply_text(f"📊 TalkShield Report\nLang: EN\n{pretty}")
+
 
 # ─────────────────────────────────────────────
 # Flask + PTB Application (webhook)
