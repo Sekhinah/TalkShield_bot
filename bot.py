@@ -235,6 +235,8 @@ flask_app = Flask(__name__)
 application = ApplicationBuilder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+application.add_handler(CommandHandler("getlogs", getlogs))
+
 
 # Dedicated event loop for PTB
 telegram_loop = asyncio.new_event_loop()
