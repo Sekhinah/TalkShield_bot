@@ -17,7 +17,7 @@ It integrates with **Telegram**, deletes toxic group messages, alerts members, a
   Owner tools → `/getlogs` to download moderation logs  
 
 
- ## Setup
+ Set up
  Clone repo 
    ```bash
    git clone https://github.com/<username>/TalkShield_bot.git
