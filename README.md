@@ -16,32 +16,31 @@ It integrates with **Telegram**, deletes toxic group messages, alerts members, a
   Queuing → Limits concurrent Hugging Face API calls  
   Owner tools → `/getlogs` to download moderation logs  
 
----
 
- Setup
+ ## Setup
  Clone repo 
    ```bash
    git clone https://github.com/Sekhinah/TalkShield_bot.git
    cd TalkShield_bot
 
-Install dependencies
+## Install dependencies
 pip install -r requirements.txt
 
-Set environment variables
+## Set environment variables
 TELEGRAM_BOT_TOKEN = <your-telegram-bot-token>
 SPACE_URL = https://Sekhinah/talkshield-api.hf.space
 TALKSHIELD_THRESHOLD = 0.50
 HF_MAX_CONCURRENCY = 2
 BOT_OWNER_ID = <your-telegram-user-id>
 
-Run locally
+## Run locally
 python bot.py
 
- Deployment
+## Deployment
 Render → host the Telegram bot
 Hugging Face Spaces → serve the ML models
 
- Models
+## Models
 Sekhinah/Talk_Shield_English
 Sekhinah/Talk_Shield
 
